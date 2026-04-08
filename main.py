@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from api.blog_routes import router as blog_router
+from api.routes import router as blog_router
 
 app = FastAPI(
     title="Day 4 - Blog Cá Nhân API",

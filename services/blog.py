@@ -1,4 +1,4 @@
-from models.blog_model import BlogPostCreate, BlogPostResponse, BlogPostUpdate
+from models.blog import BlogPostCreate, BlogPostResponse, BlogPostUpdate
 from typing import List, Optional
 
 # Fake Database

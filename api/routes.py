@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Path, Query, Header, Cookie
 from typing import List, Optional
-from models.blog_model import BlogPostCreate, BlogPostResponse, BlogPostUpdate
-from services import blog_service
+from models.blog import BlogPostCreate, BlogPostResponse, BlogPostUpdate
+from services import blog as blog_service
 
 router = APIRouter(prefix="/blogs", tags=["Blogs"])
 
