@@ -1,53 +1,146 @@
-from fastapi import APIRouter, HTTPException, Path, Query, Header, Cookie
-from typing import List, Optional
-from models.blog import BlogPostCreate, BlogPostResponse, BlogPostUpdate
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, Query, status
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from jose import JWTError, jwt
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from core.config import settings
+from core.database import get_db
+from models.schemas import (
+    BlogPostCreate,
+    BlogPostResponse,
+    BlogPostUpdate,
+    TokenResponse,
+    UserCreate,
+    UserResponse,
+)
+from models.user import User
+from services import auth as auth_service
 from services import blog as blog_service
+from services.background import write_blog_created_event
 
-router = APIRouter(prefix="/blogs", tags=["Blogs"])
+router = APIRouter()
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
-# CREATE: Tạo bài viết mới (có demo đọc Header)
-@router.post("/", response_model=BlogPostResponse)
-def create_blog_post(
-    post: BlogPostCreate, 
-    user_agent: Optional[str] = Header(None, description="Lấy thông tin User-Agent từ Header")
-):
-    print(f"Request từ trình duyệt/client: {user_agent}")
-    return blog_service.create_post(post)
 
-# READ: Lấy danh sách bài viết (có demo Query Param và Cookie)
-@router.get("/", response_model=List[BlogPostResponse])
-def get_blogs(
+async def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+        username: str | None = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+    except JWTError as exc:
+        raise credentials_exception from exc
+
+    user = await auth_service.get_user_by_username(db, username)
+    if user is None:
+        raise credentials_exception
+    return user
+
+
+@router.post("/auth/register", response_model=UserResponse, tags=["Auth"], status_code=201)
+async def register(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
+    existing_username = await auth_service.get_user_by_username(db, user_data.username)
+    if existing_username:
+        raise HTTPException(status_code=400, detail="Username already exists")
+
+    existing_email = await auth_service.get_user_by_email(db, user_data.email)
+    if existing_email:
+        raise HTTPException(status_code=400, detail="Email already exists")
+
+    user = User(
+        username=user_data.username,
+        email=user_data.email,
+        hashed_password=auth_service.hash_password(user_data.password),
+        role="user",
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+@router.post("/auth/login", response_model=TokenResponse, tags=["Auth"])
+async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
+    user = await auth_service.authenticate_user(db, form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Incorrect username or password")
+
+    access_token = auth_service.create_access_token(subject=user.username, role=user.role)
+    return TokenResponse(access_token=access_token)
+
+
+@router.get("/blogs", response_model=list[BlogPostResponse], tags=["Blogs"])
+async def get_blogs(
     limit: int = Query(10, ge=1, le=50, description="Số lượng bài viết tối đa cần lấy"),
-    session_token: Optional[str] = Cookie(None, description="Đọc token từ Cookie (nếu có)")
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    print(f"Session Token từ Cookie: {session_token}")
-    return blog_service.get_all_posts(limit=limit)
+    _ = current_user
+    return await blog_service.get_all_posts(db, limit=limit)
 
-# READ: Lấy chi tiết 1 bài viết (sử dụng Path Param)
-@router.get("/{post_id}", response_model=BlogPostResponse)
-def get_blog_by_id(
-    post_id: int = Path(..., title="ID của bài viết cần tìm", ge=1)
+
+@router.get("/blogs/{post_id}", response_model=BlogPostResponse, tags=["Blogs"])
+async def get_blog_by_id(
+    post_id: int = Path(..., title="ID của bài viết cần tìm", ge=1),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    post = blog_service.get_post_by_id(post_id)
+    _ = current_user
+    post = await blog_service.get_post_by_id(db, post_id)
     if not post:
         raise HTTPException(status_code=404, detail="Không tìm thấy bài viết")
     return post
 
-# UPDATE: Cập nhật bài viết
-@router.put("/{post_id}", response_model=BlogPostResponse)
-def update_blog_post(
-    post_update: BlogPostUpdate,
-    post_id: int = Path(..., ge=1)
-):
-    updated_post = blog_service.update_post(post_id, post_update)
-    if not updated_post:
-        raise HTTPException(status_code=404, detail="Không tìm thấy bài viết để cập nhật")
-    return updated_post
 
-# DELETE: Xóa bài viết
-@router.delete("/{post_id}")
-def delete_blog_post(post_id: int = Path(..., ge=1)):
-    success = blog_service.delete_post(post_id)
-    if not success:
+@router.post("/blogs", response_model=BlogPostResponse, tags=["Blogs"], status_code=201)
+async def create_blog_post(
+    post: BlogPostCreate,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    created_post = await blog_service.create_post(db, post, author_id=current_user.id)
+    background_tasks.add_task(write_blog_created_event, created_post.id, current_user.id)
+    return created_post
+
+
+@router.put("/blogs/{post_id}", response_model=BlogPostResponse, tags=["Blogs"])
+async def update_blog_post(
+    post_update: BlogPostUpdate,
+    post_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    post = await blog_service.get_post_by_id(db, post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Không tìm thấy bài viết để cập nhật")
+
+    if post.author_id != current_user.id and current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Bạn không có quyền sửa bài viết này")
+
+    return await blog_service.update_post(db, post, post_update)
+
+
+@router.delete("/blogs/{post_id}", tags=["Blogs"])
+async def delete_blog_post(
+    post_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    post = await blog_service.get_post_by_id(db, post_id)
+    if not post:
         raise HTTPException(status_code=404, detail="Không tìm thấy bài viết để xóa")
+
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Chỉ admin mới được xóa bài viết")
+
+    await blog_service.delete_post(db, post)
     return {"message": "Đã xóa bài viết thành công"}

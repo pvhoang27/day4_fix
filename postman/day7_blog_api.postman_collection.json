@@ -1,0 +1,115 @@
+{
+  "info": {
+    "name": "Day7 Blog API Demo",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Collection demo Day 5-7: auth, CRUD blogs, RBAC"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://127.0.0.1:8000" },
+    { "key": "adminUsername", "value": "admin_demo" },
+    { "key": "adminPassword", "value": "Admin123!" },
+    { "key": "userUsername", "value": "user_demo" },
+    { "key": "userPassword", "value": "User123!" },
+    { "key": "token", "value": "" },
+    { "key": "postId", "value": "1" }
+  ],
+  "item": [
+    {
+      "name": "Auth - Login Admin",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/x-www-form-urlencoded" }
+        ],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            { "key": "username", "value": "{{adminUsername}}", "type": "text" },
+            { "key": "password", "value": "{{adminPassword}}", "type": "text" }
+          ]
+        },
+        "url": "{{baseUrl}}/auth/login"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', function () {",
+              "  pm.response.to.have.status(200);",
+              "});",
+              "var body = pm.response.json();",
+              "pm.collectionVariables.set('token', body.access_token);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Blogs - List",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token}}" }
+        ],
+        "url": "{{baseUrl}}/blogs"
+      }
+    },
+    {
+      "name": "Blogs - Create",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Demo tu Postman\",\n  \"content\": \"Noi dung demo tao bai viet tu Postman collection Day7\"\n}"
+        },
+        "url": "{{baseUrl}}/blogs"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 201', function () {",
+              "  pm.response.to.have.status(201);",
+              "});",
+              "var body = pm.response.json();",
+              "pm.collectionVariables.set('postId', body.id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Blogs - Update",
+      "request": {
+        "method": "PUT",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Demo da update\",\n  \"content\": \"Noi dung sau khi update de demo CRUD\"\n}"
+        },
+        "url": "{{baseUrl}}/blogs/{{postId}}"
+      }
+    },
+    {
+      "name": "Blogs - Delete (admin)",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{token}}" }
+        ],
+        "url": "{{baseUrl}}/blogs/{{postId}}"
+      }
+    }
+  ]
+}

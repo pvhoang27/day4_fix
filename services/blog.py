@@ -1,37 +1,40 @@
-from models.blog import BlogPostCreate, BlogPostResponse, BlogPostUpdate
-from typing import List, Optional
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-# Fake Database
-fake_db: List[BlogPostResponse] = []
-current_id = 1
+from models.blog import BlogPost
+from models.schemas import BlogPostCreate, BlogPostUpdate
 
-def get_all_posts(limit: int = 10) -> List[BlogPostResponse]:
-    return fake_db[:limit]
 
-def get_post_by_id(post_id: int) -> Optional[BlogPostResponse]:
-    for post in fake_db:
-        if post.id == post_id:
-            return post
-    return None
+async def get_all_posts(db: AsyncSession, limit: int = 10) -> list[BlogPost]:
+    stmt = select(BlogPost).order_by(BlogPost.id.desc()).limit(limit)
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
 
-def create_post(post: BlogPostCreate) -> BlogPostResponse:
-    global current_id
-    new_post = BlogPostResponse(id=current_id, **post.model_dump())
-    fake_db.append(new_post)
-    current_id += 1
+
+async def get_post_by_id(db: AsyncSession, post_id: int) -> BlogPost | None:
+    stmt = select(BlogPost).where(BlogPost.id == post_id)
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def create_post(db: AsyncSession, post: BlogPostCreate, author_id: int) -> BlogPost:
+    new_post = BlogPost(title=post.title, content=post.content, author_id=author_id)
+    db.add(new_post)
+    await db.commit()
+    await db.refresh(new_post)
     return new_post
 
-def update_post(post_id: int, post_update: BlogPostUpdate) -> Optional[BlogPostResponse]:
-    for index, post in enumerate(fake_db):
-        if post.id == post_id:
-            updated_data = post.model_copy(update=post_update.model_dump(exclude_unset=True))
-            fake_db[index] = updated_data
-            return updated_data
-    return None
 
-def delete_post(post_id: int) -> bool:
-    for index, post in enumerate(fake_db):
-        if post.id == post_id:
-            fake_db.pop(index)
-            return True
-    return False
+async def update_post(db: AsyncSession, post: BlogPost, post_update: BlogPostUpdate) -> BlogPost:
+    update_data = post_update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(post, field, value)
+
+    await db.commit()
+    await db.refresh(post)
+    return post
+
+
+async def delete_post(db: AsyncSession, post: BlogPost) -> None:
+    await db.delete(post)
+    await db.commit()
