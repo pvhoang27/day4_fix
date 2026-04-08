@@ -1,4 +1,4 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, Header, HTTPException, Path, Query, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -80,9 +80,13 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSessi
 @router.get("/blogs", response_model=list[BlogPostResponse], tags=["Blogs"])
 async def get_blogs(
     limit: int = Query(10, ge=1, le=50, description="Số lượng bài viết tối đa cần lấy"),
+    user_agent: str | None = Header(default=None, alias="User-Agent"),
+    session_token: str | None = Cookie(default=None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    _ = user_agent
+    _ = session_token
     _ = current_user
     return await blog_service.get_all_posts(db, limit=limit)
 

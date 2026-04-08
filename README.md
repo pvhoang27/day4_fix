@@ -10,6 +10,14 @@ Project da duoc nang cap tu Day 4 (CRUD in-memory) len Day 5-7 voi:
 - Background task ghi log khi tao bai viet
 - Docker + docker-compose
 
+Day 4 checklist da co trong API hien tai:
+
+- Pydantic validation (schema request/response)
+- Path params (vi du: /blogs/{post_id})
+- Query params (limit)
+- Header demo (User-Agent)
+- Cookie demo (session_token)
+
 ## 1) Cau truc theo huong micro service (don gian)
 
 - `api/`: endpoint layer
